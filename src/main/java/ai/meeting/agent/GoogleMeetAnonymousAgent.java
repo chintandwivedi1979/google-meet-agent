@@ -126,7 +126,6 @@ public class GoogleMeetAnonymousAgent {
     }
 
 
-
     public void joinMeeting(String meetingUrl, String displayName) {
         try {
             System.out.println("Initializing Playwright...");
