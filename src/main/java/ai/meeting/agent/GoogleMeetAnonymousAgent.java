@@ -329,7 +329,7 @@ public class GoogleMeetAnonymousAgent {
     private boolean attemptBypass() {
         try {
             System.out.println("Attempting to bypass restrictions...");
-            page.reload(new Page.ReloadOptions().setTimeout(30000));
+            page.reload(new Page.ReloadOptions().setTimeout(90000));
             page.waitForTimeout(3000);
             return !isBlocked();
         } catch (Exception e) {
