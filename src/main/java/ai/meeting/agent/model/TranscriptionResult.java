@@ -1,4 +1,4 @@
-package ai.meeting.agent;
+package ai.meeting.agent.model;
 
 import java.util.ArrayList;
 import java.util.List;

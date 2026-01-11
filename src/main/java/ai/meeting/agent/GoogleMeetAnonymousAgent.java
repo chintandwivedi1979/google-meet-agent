@@ -25,7 +25,13 @@ Generate a complete working Java code using playwright and OpenAI wishper to con
  */
 
 
+import ai.meeting.agent.model.TranscriptionResult;
+import ai.meeting.agent.service.AudioCaptureService;
+import ai.meeting.agent.service.WhisperService;
+import ai.meeting.agent.util.BrowserUtil;
+import ai.meeting.agent.util.Constants;
 import com.microsoft.playwright.*;
+import com.microsoft.playwright.options.LoadState;
 import com.microsoft.playwright.options.WaitUntilState;
 
 import java.io.FileWriter;
@@ -35,8 +41,6 @@ import java.nio.file.Paths;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Arrays;
-import java.util.HashMap;
-import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
@@ -51,7 +55,7 @@ public class GoogleMeetAnonymousAgent {
     private static final int ELEMENT_TIMEOUT = 10000; // 10 seconds timeout for elements
     private static final int MAX_JOIN_RETRIES = 3;
     private volatile boolean isCleanedUp = false;
-    private static final String botName = "Agent Bot";
+
 
     private Browser browser;
     private BrowserContext context;
@@ -62,33 +66,9 @@ public class GoogleMeetAnonymousAgent {
     private PrintWriter errorLogger;
     private volatile boolean isRunning = true;
 
-    private static String[] enhancedBrowserArgs = {
-            "--no-sandbox",
-            "--disable-blink-features=AutomationControlled",
-            "--exclude-switches=enable-automation",
-            "--disable-extensions",
-            "--disable-default-apps",
-            "--use-fake-ui-for-media-stream=1",
-            "--use-fake-device-for-media-stream=1",
-            "--allow-running-insecure-content",
-            "--disable-web-security",
-            "--ignore-certificate-errors",
-            "--ignore-ssl-errors",
-            "--disable-dev-shm-usage",
-            "--disable-background-timer-throttling",
-            "--disable-backgrounding-occluded-windows",
-            "--disable-renderer-backgrounding",
-            "--disable-field-trial-config",
-            "--no-first-run",
-            "--no-default-browser-check",
-            "--disable-sync",
-            "--disable-translate",
-            "--hide-scrollbars",
-            "--mute-audio"
-    };
 
     public static void main(String[] args) {
-        String meetingUrl = args.length > 0 ? args[0] : "https://meet.google.com/abc-abcd-xdz";
+        String meetingUrl = args.length > 0 ? args[0] : "https://meet.google.com/rse-erdc-xdz";
         GoogleMeetAnonymousAgent agent = new GoogleMeetAnonymousAgent();
 
         // Add shutdown hook for cleanup
@@ -106,7 +86,6 @@ public class GoogleMeetAnonymousAgent {
 
         } catch (Exception e) {
             System.err.println("Error running agent: " + e.getMessage());
-            agent.logError("Main execution error", e);
         } finally {
             agent.cleanup();
         }
@@ -121,7 +100,8 @@ public class GoogleMeetAnonymousAgent {
             this.audioCaptureService = new AudioCaptureService();
             this.errorLogger = new PrintWriter(new FileWriter(ERROR_LOG_FILE, true));
         } catch (Exception e) {
-            logError("Failed to initialize GoogleMeetAnonymousAgent", e);
+            System.out.println("Failed to initialize GoogleMeetAnonymousAgent : " + e.getMessage());
+            e.printStackTrace();
         }
     }
 
@@ -131,11 +111,12 @@ public class GoogleMeetAnonymousAgent {
             System.out.println("Initializing Playwright...");
             playwright = Playwright.create();
 
-            browser = createStealthBrowser(playwright);
+            browser = BrowserUtil.createStealthBrowser(playwright);
             System.out.println("Browser launched successfully");
 
-            context = createStealthContext(browser);
+            context = BrowserUtil.createStealthContext(browser);
             page = context.newPage();
+            //page.waitForLoadState(LoadState.DOMCONTENTLOADED);
 
             // Enhanced error handlers
             page.onClose(page1 -> {
@@ -149,8 +130,8 @@ public class GoogleMeetAnonymousAgent {
             });
 
             // Add comprehensive stealth scripts
-            addEnhancedStealthScript(page);
-            page.setDefaultTimeout(45000);
+            BrowserUtil.addEnhancedStealthScript(page);
+            page.setDefaultTimeout(90000);
 
             System.out.println("Navigating to meeting: " + meetingUrl);
 
@@ -174,13 +155,13 @@ public class GoogleMeetAnonymousAgent {
             }
 
             // Handle name input
-            handleNameInput(displayName);
+            BrowserUtil.handleNameInput(page, displayName);
 
             // Disable audio and video
-            disableAudioVideo();
+            BrowserUtil.disableAudioVideo(page);
 
             // Click join button
-            clickJoinButton();
+            BrowserUtil.clickJoinButton(page);
 
             // Wait for meeting status
             handleMeetingFlow();
@@ -188,197 +169,6 @@ public class GoogleMeetAnonymousAgent {
         } catch (Exception e) {
             System.err.println("Error joining meeting: " + e.getMessage());
             e.printStackTrace();
-        }
-    }
-
-    private void handleNameInput(String displayName) {
-        try {
-            page.waitForTimeout(3000); // Wait for page to fully load
-
-            String[] nameSelectors = {
-                    "input[aria-label*='Your name']",
-                    "input[placeholder*='Your name']",
-                    "input[aria-label*='Name']",
-                    "input[data-initial-value]",
-                    "input[type='text']"
-            };
-
-            boolean nameFieldFound = false;
-            for (String selector : nameSelectors) {
-                try {
-                    if (page.locator(selector).count() > 0) {
-                        // Clear existing text and enter name
-                        page.fill(selector, "");
-                        page.waitForTimeout(500);
-                        page.fill(selector, displayName != null ? displayName : botName);
-                        page.waitForTimeout(500);
-
-                        // Optionally press Tab or Enter to confirm
-                        page.press(selector, "Tab");
-
-                        System.out.println("✓ Entered name: " + (displayName != null ? displayName : botName));
-                        nameFieldFound = true;
-                        break;
-                    }
-                } catch (Exception e) {
-                    System.out.println("Selector failed: " + selector + " - " + e.getMessage());
-                }
-            }
-
-            if (!nameFieldFound) {
-                System.out.println("⚠ Name input field not found, continuing anyway...");
-            }
-
-            page.waitForTimeout(2000); // Wait for UI to update
-
-        } catch (Exception e) {
-            System.out.println("Error handling name input: " + e.getMessage());
-        }
-    }
-
-    private void disableAudioVideo() {
-        try {
-            System.out.println("Attempting to disable audio/video...");
-            page.waitForTimeout(2000);
-
-            // Disable microphone with enhanced selectors
-            String[] micSelectors = {
-                    "button[aria-label*='Turn off microphone' i]",
-                    "button[aria-label*='microphone' i]",
-                    "button[data-testid*='mic']",
-                    "button[data-tooltip*='microphone' i]",
-                    ".qOwgVe button", // Google Meet specific class
-                    "div[role='button'][aria-label*='microphone' i]"
-            };
-
-            boolean micDisabled = false;
-            for (String selector : micSelectors) {
-                try {
-                    if (page.locator(selector).count() > 0) {
-                        // Check if microphone is currently enabled (button should indicate "turn off")
-                        String ariaLabel = page.locator(selector).getAttribute("aria-label");
-                        if (ariaLabel != null && ariaLabel.toLowerCase().contains("turn off")) {
-                            page.click(selector);
-                            System.out.println("✓ Microphone disabled");
-                            micDisabled = true;
-                            break;
-                        } /*else if (ariaLabel != null && ariaLabel.toLowerCase().contains("microphone")) {
-                            page.click(selector);
-                            System.out.println("✓ Microphone toggled");
-                            micDisabled = true;
-                            break;
-                        }*/
-                    }
-                } catch (Exception e) {
-                    // Continue to next selector
-                }
-            }
-
-            page.waitForTimeout(1000);
-
-            // Disable camera with enhanced selectors
-            String[] cameraSelectors = {
-                    "button[aria-label*='Turn off camera' i]",
-                    "button[aria-label*='camera' i]",
-                    "button[data-testid*='camera']",
-                    "button[data-tooltip*='camera' i]",
-                    ".GOH7Zb button", // Google Meet specific class
-                    "div[role='button'][aria-label*='camera' i]"
-            };
-
-            boolean cameraDisabled = false;
-            for (String selector : cameraSelectors) {
-                try {
-                    if (page.locator(selector).count() > 0) {
-                        String ariaLabel = page.locator(selector).getAttribute("aria-label");
-                        if (ariaLabel != null && ariaLabel.toLowerCase().contains("turn off")) {
-                            page.click(selector);
-                            System.out.println("✓ Camera disabled");
-                            cameraDisabled = true;
-                            break;
-                        } /*else if (ariaLabel != null && ariaLabel.toLowerCase().contains("camera")) {
-                            page.click(selector);
-                            System.out.println("✓ Camera toggled");
-                            cameraDisabled = true;
-                            break;
-                        }*/
-                    }
-                } catch (Exception e) {
-                    // Continue to next selector
-                }
-            }
-
-            if (!micDisabled && !cameraDisabled) {
-                System.out.println("⚠ Could not find audio/video controls - they may already be disabled");
-            }
-
-            page.waitForTimeout(1000);
-
-        } catch (Exception e) {
-            System.out.println("Error disabling audio/video: " + e.getMessage());
-        }
-    }
-
-    private void clickJoinButton() {
-        try {
-            System.out.println("Looking for join button...");
-            page.waitForTimeout(2000);
-
-            String[] joinSelectors = {
-                    "button:has-text('Ask to join')",
-                    "button:has-text('Join now')",
-                    "button:has-text('Join')",
-                    "[data-testid='join-flow-upsell-join-button']",
-                    ".uArJ5e.UQuaGc.Y5sE8d.uyXBBb.xKiqt", // Google Meet join button class
-                    "div[role='button']:has-text('Ask to join')",
-                    "div[role='button']:has-text('Join')",
-                    "span:has-text('Ask to join'):parent::button",
-                    "span:has-text('Join'):parent::button"
-            };
-
-            boolean clicked = false;
-            for (String selector : joinSelectors) {
-                try {
-                    if (page.locator(selector).count() > 0) {
-                        // Make sure the button is visible and enabled
-                        if (page.locator(selector).isVisible()) {
-                            page.click(selector);
-                            System.out.println("✓ Clicked join button: " + selector);
-                            clicked = true;
-                            break;
-                        }
-                    }
-                } catch (Exception e) {
-                    System.out.println("Join button selector failed: " + selector + " - " + e.getMessage());
-                }
-            }
-
-            if (!clicked) {
-                System.out.println("Standard join buttons not found, trying alternative approach...");
-
-                // Try to find any clickable element with join text
-                try {
-                    page.locator("text=Ask to join").click();
-                    System.out.println("✓ Clicked 'Ask to join' text element");
-                    clicked = true;
-                } catch (Exception e) {
-                    try {
-                        page.locator("text=Join").click();
-                        System.out.println("✓ Clicked 'Join' text element");
-                        clicked = true;
-                    } catch (Exception e2) {
-                        System.out.println("⚠ No join button found - manual intervention may be required");
-                    }
-                }
-            }
-
-            if (clicked) {
-                page.waitForTimeout(3000); // Wait for the join request to be processed
-                System.out.println("Join request submitted, waiting for response...");
-            }
-
-        } catch (Exception e) {
-            System.out.println("Error clicking join button: " + e.getMessage());
         }
     }
 
@@ -410,38 +200,6 @@ public class GoogleMeetAnonymousAgent {
 
         } catch (Exception e) {
             System.out.println("Error in meeting flow: " + e.getMessage());
-        }
-    }
-
-    private void startMeetingParticipation() {
-        try {
-            System.out.println("🚀 Meeting participation started. Press Ctrl+C to exit.");
-            System.out.println("Bot will stay in the meeting until disconnected or meeting ends.");
-
-            int checkCount = 0;
-            while (isInMeeting()) {
-                page.waitForTimeout(30000); // Check every 30 seconds
-                checkCount++;
-                System.out.println("📹 Still in meeting... (Check #" + checkCount + ")");
-
-                // Optional: Add periodic activity to show presence
-                if (checkCount % 10 == 0) { // Every 5 minutes
-                    try {
-                        // Move mouse slightly to show activity
-                        page.mouse().move(100, 100);
-                        page.waitForTimeout(100);
-                        page.mouse().move(200, 200);
-                        System.out.println("👋 Simulated user activity");
-                    } catch (Exception e) {
-                        // Ignore activity simulation errors
-                    }
-                }
-            }
-
-            System.out.println("📞 Meeting ended or disconnected");
-
-        } catch (Exception e) {
-            System.out.println("Error during meeting participation: " + e.getMessage());
         }
     }
 
@@ -522,7 +280,7 @@ public class GoogleMeetAnonymousAgent {
 
                 page.navigate(meetingUrl, new Page.NavigateOptions()
                         .setWaitUntil(WaitUntilState.DOMCONTENTLOADED)
-                        .setTimeout(45000));
+                        .setTimeout(50000));
 
                 return true;
             } catch (Exception e) {
@@ -534,7 +292,7 @@ public class GoogleMeetAnonymousAgent {
                         // Create new page if current one is broken
                         try {
                             page = context.newPage();
-                            addEnhancedStealthScript(page);
+                            BrowserUtil.addEnhancedStealthScript(page);
                         } catch (Exception newPageException) {
                             System.err.println("Failed to create new page: " + newPageException.getMessage());
                         }
@@ -584,7 +342,7 @@ public class GoogleMeetAnonymousAgent {
         try {
             if (context != null && !isCleanedUp) {
                 page = context.newPage();
-                addEnhancedStealthScript(page);
+                BrowserUtil.addEnhancedStealthScript(page);
             }
         } catch (Exception e) {
             System.err.println("Failed to recover from page closure: " + e.getMessage());
@@ -594,150 +352,15 @@ public class GoogleMeetAnonymousAgent {
     private void handlePageCrash() {
         try {
             if (browser != null && !isCleanedUp) {
-                context = createStealthContext(browser);
+                context = BrowserUtil.createStealthContext(browser);
                 page = context.newPage();
-                addEnhancedStealthScript(page);
+                BrowserUtil.addEnhancedStealthScript(page);
             }
         } catch (Exception e) {
             System.err.println("Failed to recover from page crash: " + e.getMessage());
         }
     }
 
-    private Browser createStealthBrowser(Playwright playwright) {
-        String[] enhancedBrowserArgs = {
-                "--no-sandbox",
-                "--no-sandbox",
-                "--disable-blink-features=AutomationControlled",
-                "--exclude-switches=enable-automation",
-                "--disable-extensions",
-                "--disable-default-apps",
-                "--use-fake-ui-for-media-stream=1",
-                "--use-fake-device-for-media-stream=1",
-                "--allow-running-insecure-content",
-                "--disable-web-security",
-                "--ignore-certificate-errors",
-                "--ignore-ssl-errors",
-                "--disable-dev-shm-usage",
-                "--disable-background-timer-throttling",
-                "--disable-backgrounding-occluded-windows",
-                "--disable-renderer-backgrounding",
-                "--disable-field-trial-config",
-                "--no-first-run",
-                "--no-default-browser-check",
-                "--disable-sync",
-                "--disable-translate",
-                "--hide-scrollbars",
-                "--mute-audio"
-        };
-
-        return playwright.chromium().launch(new BrowserType.LaunchOptions()
-                .setHeadless(false) // Set to true to run headlessly
-                .setSlowMo(100)
-                .setArgs(Arrays.asList(enhancedBrowserArgs))
-        );
-    }
-
-    private BrowserContext createStealthContext(Browser browser) {
-        Map<String, String> extraHeaders = new HashMap<>();
-        extraHeaders.put("Accept-Language", "en-US,en;q=0.9");
-        extraHeaders.put("Accept-Encoding", "gzip, deflate, br");
-        extraHeaders.put("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8");
-        extraHeaders.put("Sec-Fetch-Site", "none");
-        extraHeaders.put("Sec-Fetch-Mode", "navigate");
-        extraHeaders.put("Sec-Fetch-User", "?1");
-        extraHeaders.put("Sec-Fetch-Dest", "document");
-        extraHeaders.put("Cache-Control", "max-age=0");
-
-        Browser.NewContextOptions contextOptions = new Browser.NewContextOptions()
-                .setViewportSize(1420, 780)
-                .setUserAgent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
-                .setExtraHTTPHeaders(extraHeaders)
-                .setJavaScriptEnabled(true)
-                .setIgnoreHTTPSErrors(true)
-                .setPermissions(Arrays.asList("camera", "microphone", "notifications"))
-                .setTimezoneId("America/New_York")
-                .setLocale("en-US");
-
-        return browser.newContext(contextOptions);
-    }
-
-    /**
-     * Add comprehensive stealth scripts to avoid bot detection
-     */
-    private void addEnhancedStealthScript(Page page) {
-        String stealthScript = """
-            () => {
-                // Remove webdriver property completely
-                delete navigator.__proto__.webdriver;
-                delete navigator.webdriver;
-
-                // Override webdriver property
-                Object.defineProperty(navigator, 'webdriver', {
-                    get: () => undefined,
-                    configurable: true
-                });
-
-                // Mock comprehensive navigator properties
-                Object.defineProperty(navigator, 'plugins', {
-                    get: () => [
-                        {
-                            name: 'Chrome PDF Plugin',
-                            description: 'Portable Document Format',
-                            filename: 'internal-pdf-viewer',
-                            length: 1,
-                            item: () => null,
-                            namedItem: () => null
-                        },
-                        {
-                            name: 'Chrome PDF Viewer',
-                            description: 'PDF Viewer',
-                            filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai',
-                            length: 1,
-                            item: () => null,
-                            namedItem: () => null
-                        }
-                    ]
-                });
-
-                // Enhanced properties
-                Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
-                Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
-                Object.defineProperty(navigator, 'platform', { get: () => 'MacIntel' });
-                Object.defineProperty(navigator, 'maxTouchPoints', { get: () => 0 });
-
-                // Remove automation indicators
-                delete window.cdc_adoQpoasnfa76pfcZLmcfl_Array;
-                delete window.cdc_adoQpoasnfa76pfcZLmcfl_Promise;
-                delete window.cdc_adoQpoasnfa76pfcZLmcfl_Symbol;
-                delete window.__playwright;
-                delete window._playwright;
-
-                // Enhanced media devices mock
-                if (navigator.mediaDevices) {
-                    navigator.mediaDevices.enumerateDevices = async () => {
-                        return [
-                            {
-                                deviceId: 'default',
-                                kind: 'audioinput',
-                                label: 'MacBook Pro Microphone',
-                                groupId: 'a8f2d4e6c1b3f7e9d2c4a6b8e1f3d7c9'
-                            },
-                            {
-                                deviceId: 'aa8c7b4e2f1d9c6b3e7a1f5d8c2b6e9a',
-                                kind: 'videoinput',
-                                label: 'FaceTime HD Camera',
-                                groupId: 'a8f2d4e6c1b3f7e9d2c4a6b8e1f3d7c9'
-                            }
-                        ];
-                    };
-                }
-
-                console.info('Stealth mode activated');
-            }
-            """;
-
-        page.addInitScript(stealthScript);
-    }
 
 
 
@@ -772,7 +395,7 @@ public class GoogleMeetAnonymousAgent {
             return false;
 
         } catch (Exception e) {
-            logError("Error checking for join restrictions", e);
+            BrowserUtil.logError(errorLogger, "Error checking for join restrictions", e);
             return false;
         }
     }
@@ -832,7 +455,7 @@ public class GoogleMeetAnonymousAgent {
             return false;
 
         } catch (Exception e) {
-            logError("Error handling restricted meeting", e);
+            BrowserUtil.logError(errorLogger, "Error handling restricted meeting", e);
             return false;
         }
     }
@@ -889,7 +512,7 @@ public class GoogleMeetAnonymousAgent {
             }
 
         } catch (Exception e) {
-            logError("Error disabling media devices", e);
+            BrowserUtil.logError(errorLogger, "Error disabling media devices", e);
         }
     }
 
@@ -933,7 +556,7 @@ public class GoogleMeetAnonymousAgent {
             handlePermissionButton(notificationSelectors, "notification");
 
         } catch (Exception e) {
-            logError("Error handling permissions", e);
+            BrowserUtil.logError(errorLogger, "Error handling permissions", e);
         }
     }
 
@@ -1018,7 +641,7 @@ public class GoogleMeetAnonymousAgent {
             return true; // Assume success if we can't determine
 
         } catch (Exception e) {
-            logError("Error joining meeting room", e);
+            BrowserUtil.logError(errorLogger, "Error joining meeting room", e);
             return false;
         }
     }
@@ -1048,7 +671,7 @@ public class GoogleMeetAnonymousAgent {
                             try {
                                 Files.deleteIfExists(Paths.get(audioFile));
                             } catch (Exception cleanupError) {
-                                logError("Error cleaning up audio file", cleanupError);
+                                BrowserUtil.logError(errorLogger, "Error cleaning up audio file", cleanupError);
                             }
                         }
 
@@ -1057,7 +680,7 @@ public class GoogleMeetAnonymousAgent {
 
                     } catch (Exception e) {
                         if (isRunning) {
-                            logError("Error in transcription loop", e);
+                            BrowserUtil.logError(errorLogger, "Error in transcription loop", e);
                             try {
                                 TimeUnit.SECONDS.sleep(5);
                             } catch (InterruptedException ie) {
@@ -1071,7 +694,7 @@ public class GoogleMeetAnonymousAgent {
             });
 
         } catch (Exception e) {
-            logError("Error starting transcription", e);
+            BrowserUtil.logError(errorLogger, "Error starting transcription", e);
         }
     }
 
@@ -1082,9 +705,9 @@ public class GoogleMeetAnonymousAgent {
         String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss"));
 
         // Enable debugging occasionally
-        if (System.currentTimeMillis() % 30000 < 1000) { // Every 30 seconds roughly
-            debugSpeakerElements();
-        }
+//        if (System.currentTimeMillis() % 30000 < 1000) { // Every 30 seconds roughly
+//            debugSpeakerElements();
+//        }
 
         String speakerName = extractSpeakerName();
 
@@ -1254,7 +877,7 @@ public class GoogleMeetAnonymousAgent {
             return "Unknown Speaker";
 
         } catch (Exception e) {
-            logError("Error extracting speaker name", e);
+            BrowserUtil.logError(errorLogger, "Error extracting speaker name", e);
             return "Unknown Speaker";
         }
     }
@@ -1378,103 +1001,6 @@ public class GoogleMeetAnonymousAgent {
 
 
     /**
-     * Enhanced speaker name extraction from Google Meet UI
-     */
-/*    private String extractSpeakerName() {
-        try {
-            // Enhanced selectors for speaker identification
-            String[] speakerSelectors = {
-                    "[data-speaking='true']",
-                    ".speaking-indicator",
-                    "[aria-label*='speaking' i]",
-                    "[data-participant-id][data-self-name]",
-                    ".participant-name.speaking",
-                    "[role='button'][aria-label*='speaking']"
-            };
-
-            for (String selector : speakerSelectors) {
-                try {
-                    Locator speakerElements = page.locator(selector);
-                    if (speakerElements.count() > 0) {
-                        String speakerName = speakerElements.first().getAttribute("aria-label");
-                        if (speakerName != null && !speakerName.isEmpty()) {
-                            return cleanSpeakerName(speakerName);
-                        }
-
-                        // Try text content if aria-label is empty
-                        String textContent = speakerElements.first().textContent();
-                        if (textContent != null && !textContent.trim().isEmpty()) {
-                            return cleanSpeakerName(textContent);
-                        }
-                    }
-                } catch (Exception e) {
-                    continue;
-                }
-            }
-
-            // Fallback: get any participant names
-            String[] participantSelectors = {
-                    "[data-participant-id] [data-self-name]",
-                    ".participant-name",
-                    "[role='button'][aria-label*='participant']"
-            };
-
-            for (String selector : participantSelectors) {
-                try {
-                    Locator participants = page.locator(selector);
-                    if (participants.count() > 0) {
-                        String name = participants.first().textContent();
-                        if (name != null && !name.trim().isEmpty()) {
-                            return cleanSpeakerName(name);
-                        }
-                    }
-                } catch (Exception e) {
-                    continue;
-                }
-            }
-
-            return "Unknown Speaker";
-
-        } catch (Exception e) {
-            logError("Error extracting speaker name", e);
-            return "Unknown Speaker";
-        }
-    }
-
-    *//**
-     * Clean and format speaker name
-     *//*
-    private String cleanSpeakerName(String rawName) {
-        if (rawName == null) return "Unknown Speaker";
-
-        return rawName
-                .replaceAll("(?i)(speaking|microphone|camera|muted|unmuted)", "")
-                .replaceAll("[()\\[\\]]", "")
-                .trim();
-    }*/
-
-
-
-
-    /**
-     * Enhanced error logging with timestamps and stack traces
-     */
-    private void logError(String message, Exception e) {
-        String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
-        String errorMessage = String.format("[%s] %s: %s", timestamp, message, e.getMessage());
-
-        System.err.println("❌ " + errorMessage);
-
-        if (errorLogger != null) {
-            errorLogger.println(errorMessage);
-            if (e instanceof RuntimeException) {
-                e.printStackTrace(errorLogger);
-            }
-            errorLogger.flush();
-        }
-    }
-
-    /**
      * Comprehensive cleanup method for all resources
      */
     public void cleanup() {
@@ -1579,7 +1105,7 @@ public class GoogleMeetAnonymousAgent {
 
             } catch (Exception e) {
                 retryCount++;
-                logError("Failed to join meeting on attempt " + retryCount, e);
+                BrowserUtil.logError(errorLogger, "Failed to join meeting on attempt " + retryCount, e);
 
                 if (retryCount < MAX_JOIN_RETRIES) {
                     System.out.println("🔄 Retrying to join meeting in 5 seconds...");
@@ -1611,20 +1137,20 @@ public class GoogleMeetAnonymousAgent {
             this.browser = playwright.chromium().launch(new BrowserType.LaunchOptions()
                     .setHeadless(false) // Set to true for production
                     .setSlowMo(100)
-                    .setArgs(Arrays.asList(enhancedBrowserArgs)));
+                    .setArgs(Arrays.asList(Constants.ENHANCED_BROWSER_ARGS)));
 
             System.out.println("Browser launched successfully");
 
             // Enhanced context options
-            context = createStealthContext(browser);
+            context = BrowserUtil.createStealthContext(browser);
 
             page = context.newPage();
 
             // Enhanced stealth scripts to avoid detection
-            addEnhancedStealthScript(page);
+            BrowserUtil.addEnhancedStealthScript(page);
 
         } catch (Exception e) {
-            logError("Failed to initialize browser", e);
+            BrowserUtil.logError(errorLogger, "Failed to initialize browser", e);
         }
     }
 
@@ -1676,7 +1202,7 @@ public class GoogleMeetAnonymousAgent {
             handlePermissionButton(continueSelectors, "continue");
 
         } catch (Exception e) {
-            logError("Error entering anonymous name", e);
+            BrowserUtil.logError(errorLogger, "Error entering anonymous name", e);
         }
     }
 }

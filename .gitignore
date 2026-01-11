@@ -1,1 +1,8 @@
 /target/
+/*.wav
+/.idea/compiler.xml
+/.idea/copilot.data.migration.ask2agent.xml
+/error_log.txt
+/.idea/jarRepositories.xml
+/.idea/misc.xml
+/.idea/vcs.xml

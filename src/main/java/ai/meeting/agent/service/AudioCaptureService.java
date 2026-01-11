@@ -1,4 +1,4 @@
-package ai.meeting.agent;
+package ai.meeting.agent.service;
 
 import javax.sound.sampled.*;
 import java.io.*;

@@ -1,5 +1,6 @@
-package ai.meeting.agent;
+package ai.meeting.agent.service;
 
+import ai.meeting.agent.model.TranscriptionResult;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import okhttp3.*;
