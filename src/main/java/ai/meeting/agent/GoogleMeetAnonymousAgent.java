@@ -101,7 +101,7 @@ public class GoogleMeetAnonymousAgent {
             this.errorLogger = new PrintWriter(new FileWriter(ERROR_LOG_FILE, true));
         } catch (Exception e) {
             System.out.println("Failed to initialize GoogleMeetAnonymousAgent : " + e.getMessage());
-            e.printStackTrace();
+            //e.printStackTrace();
         }
     }
 
@@ -168,7 +168,7 @@ public class GoogleMeetAnonymousAgent {
 
         } catch (Exception e) {
             System.err.println("Error joining meeting: " + e.getMessage());
-            e.printStackTrace();
+           // e.printStackTrace();
         }
     }
 
@@ -1042,167 +1042,8 @@ public class GoogleMeetAnonymousAgent {
 
         } catch (Exception e) {
             System.err.println("❌ Error during cleanup: " + e.getMessage());
-            e.printStackTrace();
+            //e.printStackTrace();
         }
     }
 
-
-
-    /**
-     * Join Google Meet with retry mechanism
-     */
-    public void joinMeeting1(String meetingUrl) {
-        int retryCount = 0;
-        boolean joinSuccessful = false;
-
-        initializeBrowser();
-
-        while (retryCount < MAX_JOIN_RETRIES && !joinSuccessful && isRunning) {
-            try {
-                System.out.println("Attempt " + (retryCount + 1) + " - Navigating to Google Meet: " + meetingUrl);
-
-                // Navigate and wait for DOM to load
-                page.navigate(meetingUrl, new Page.NavigateOptions().setWaitUntil(WaitUntilState.DOMCONTENTLOADED));
-
-                // Wait for page to stabilize
-                page.waitForTimeout(5000);
-
-                // Check for "can't join" message first
-                if (checkForJoinRestrictions()) {
-                    System.out.println("❌ Meeting has restrictions - trying alternative approach...");
-                    if (!handleRestrictedMeeting()) {
-                        retryCount++;
-                        continue;
-                    }
-                }
-
-                // Handle permissions and popups
-                handlePermissions();
-
-                // Disable camera and microphone before joining
-                disableMediaDevices();
-
-                // Enter anonymous name
-                enterAnonymousName();
-
-                // Attempt to join meeting
-                if (joinMeetingRoom()) {
-                    joinSuccessful = true;
-                    System.out.println("✅ Successfully joined meeting on attempt " + (retryCount + 1));
-
-                    // Wait for meeting to fully load
-                    page.waitForTimeout(10000);
-
-                    // Start transcription after successful join
-                    startTranscription();
-                } else {
-                    retryCount++;
-                    if (retryCount < MAX_JOIN_RETRIES) {
-                        System.out.println("⚠️ Join attempt failed, retrying in 5 seconds...");
-                        page.waitForTimeout(5000);
-                    }
-                }
-
-            } catch (Exception e) {
-                retryCount++;
-                BrowserUtil.logError(errorLogger, "Failed to join meeting on attempt " + retryCount, e);
-
-                if (retryCount < MAX_JOIN_RETRIES) {
-                    System.out.println("🔄 Retrying to join meeting in 5 seconds...");
-                    try {
-                        Thread.sleep(5000);
-                    } catch (InterruptedException ie) {
-                        Thread.currentThread().interrupt();
-                        break;
-                    }
-                }
-            }
-        }
-
-        if (!joinSuccessful) {
-            System.err.println("❌ Failed to join meeting after " + MAX_JOIN_RETRIES + " attempts");
-        }
-    }
-
-    /**
-     * Initialize browser with enhanced stealth mode and security settings
-     */
-    private void initializeBrowser() {
-        try {
-            System.out.println("Initializing browser with stealth mode...");
-
-            this.playwright = Playwright.create();
-
-            // Enhanced browser launch options for stealth mode
-            this.browser = playwright.chromium().launch(new BrowserType.LaunchOptions()
-                    .setHeadless(false) // Set to true for production
-                    .setSlowMo(100)
-                    .setArgs(Arrays.asList(Constants.ENHANCED_BROWSER_ARGS)));
-
-            System.out.println("Browser launched successfully");
-
-            // Enhanced context options
-            context = BrowserUtil.createStealthContext(browser);
-
-            page = context.newPage();
-
-            // Enhanced stealth scripts to avoid detection
-            BrowserUtil.addEnhancedStealthScript(page);
-
-        } catch (Exception e) {
-            BrowserUtil.logError(errorLogger, "Failed to initialize browser", e);
-        }
-    }
-
-    /**
-     * Enter anonymous name for meeting join
-     */
-    private void enterAnonymousName() {
-        try {
-            System.out.println("Entering anonymous name...");
-
-            // Multiple selectors for name input field
-            String[] nameSelectors = {
-                    "input[placeholder*='name' i]",
-                    "input[aria-label*='name' i]",
-                    "input[type='text']",
-                    "[role='textbox']"
-            };
-
-            boolean nameEntered = false;
-            for (String selector : nameSelectors) {
-                try {
-                    Locator nameInput = page.locator(selector);
-                    if (nameInput.count() > 0) {
-                        nameInput.fill("Anonymous Participant");
-                        nameEntered = true;
-                        System.out.println("Anonymous name entered successfully");
-                        break;
-                    }
-                } catch (Exception e) {
-                    continue;
-                }
-            }
-
-            if (!nameEntered) {
-                System.out.println("No name input field found - proceeding without name entry");
-            }
-
-            // Click continue/next button with enhanced selectors
-            String[] continueSelectors = {
-                    "button:has-text('Ask to join')",
-                    "button:has-text('Continue')",
-                    "button:has-text('Next')",
-                    "button:has-text('Join')",
-                    "[data-is-touch-wrapper] button",
-                    "[role='button']:has-text('Continue')",
-                    "[role='button']:has-text('Next')"
-            };
-
-            handlePermissionButton(continueSelectors, "continue");
-
-        } catch (Exception e) {
-            BrowserUtil.logError(errorLogger, "Error entering anonymous name", e);
-        }
-    }
 }
